@@ -1,3 +1,5 @@
+import numpy as np
+
 
 class EXE_LogInfo:
     def __init__(self, logfile):
@@ -41,6 +43,9 @@ class EXE_LogInfo:
                 else:
                     self.fixed = False
 
+            if 'init-wl-delta' in l and hasattr(self, 'init_wl') is False:
+                self.init_wl = float(l.split('=')[1])
+
             if 'ref-t' in l and hasattr(self, 'temp') is None:
                 self.temp = float(l.split(':')[1])
 
@@ -50,6 +55,121 @@ class EXE_LogInfo:
             if 'Started mdrun' in l:
                 self.start = line_n  # the line number that the simulation starts
                 break
+
+        # Set the default of some attributes
+        self.equil = False
+
+    def extract_equil_info(self, logfile):
+        """
+        Extracts information about the execution of Wang-Landau algorithm, including the 
+        Wang-Landau weights and the Wang-Landau incrementor. This function is specifically 
+        for expanded ensemble simulations whose weights were being updated (equilibrated or
+        not).
+        """
+        f = open(logfile, 'r')
+        lines = f.readlines()
+        f.close()
+
+        # for saving wl_incrementor as a function of time
+        wl_incrementor = [self.init_wl]
+        update_step = []   # steps at which the weights are updated
+        line_n = self.start
+
+        for l in lines[self.start:]:
+            line_n += 1
+
+            # Step 1: Extract the Wang-Landau incrementor
+            if 'weights are now: ' in l:
+                # this line only appears before the WL incrementor is about to change
+                weights_line = l.split(':')
+                update_step.append(int(weights_line[0].split()[1]))
+
+                # for searching WL incrementor
+                search_lines = lines[line_n + 1: line_n + 15]
+                # the info of the incrementor typically appears within the next 15 lines
+                for l_search in search_lines:
+                    if 'Wang-Landau incrementor is:' in l_search:
+                        wl_incrementor.append(float(l_search.split(':')[1]))
+
+            # Step 2: Extract the Wang-Landau weights
+            # Case 2-1: Euilibrated weights
+            if 'Weights have equilibrated' in l:
+                self.equil = True
+                # Step 1: search equilibrated weights
+                # step at which the weights are equilibrated
+                equil_step = l.split(':')[0].split()[1]
+                # lines for searching weights
+                search_lines = lines[line_n - 9:line_n]
+
+                for l_search in search_lines:
+                    if 'weights are now: ' in l_search:
+                        self.equil_w = [float(i)
+                                        for i in l_search.split(':')[2].split()]
+
+                # Step 2: search equilibrated counts for each states
+                self.equil_counts = []
+                search_n = line_n - (30 + self.N_states)
+                search_lines = lines[line_n - (30 + self.N_states): line_n]
+                # 30 is the approximate number of lines of metadata between the counts data and the position
+                # at which the weights are found equilibrated.
+
+                for l_search in search_lines:
+                    search_n += 1
+                    if 'MC-lambda information' in l_search:
+                        for i in range(self.N_states):
+                            # start from lines[search_n + 2]
+                            if lines[search_n + 2 + i].split()[-1] == '<<':
+                                self.equil_counts.append(
+                                    float(lines[search_n + 2 + i].split()[-4]))
+                            else:
+                                self.equil_counts.append(
+                                    float(lines[search_n + 2 + i].split()[-3]))
+
+                self.equil_time = float(equil_step) * \
+                    self.dt / 1000   # units: ns
+
+                break
+
+        # Case 2-2: Non-equilibrated weights
+        if self.fixed is False and self.equil is False:
+            
+
+
+        update_time = np.array(update_step) * self.dt / 1000   # units: ns
+        wl_incrementor = np.array(wl_incrementor)
+
+        return update_time, wl_incrementor
+
+    def extract_final_counts(self, logfile):
+        f = open(logfile, 'r')
+        lines = f.readlines()
+        f.close()
+        lines.reverse()  
+
+        final_found = False   # whether the final counts are found
+        line_n = 0
+        final_counts = np.zeros(self.N_states)
+        self.final_w = np.zeros(self.N_states)
+        for l in lines:
+            line_n += 1
+            if 'MC-lambda information' in l: # should find this line first (lines[line_n - 1])
+                final_found = True
+                for i in range(self.N_states):
+                    if lines[line_n - 4 - i].split()[-1] == '<<':
+                        self.final_w.append(float(lines[line_n - 4 - i].split()[-3]))
+                        final_counts[i] = float(lines[line_n - 4 - i].split()[-4])
+                    else:
+                        self.final_w.append(float(lines[line_n - 4 - i].split()[-2]))
+                        final_counts[i] = float(lines[line_n - 4 - i].split()[-3])
+            
+            if '  Step  ' in l and final_found is True:  # lines[line_n - 1]
+                final_time = float(lines[line_ne - 2].split()[1]) / 1000  # units: ns
+                break
+
+        return final_time, final_counts
+        
+
+
 
 
 class REMD_LogInfo:
