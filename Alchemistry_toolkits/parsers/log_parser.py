@@ -91,8 +91,7 @@ class EXE_LogInfo:
                     if 'Wang-Landau incrementor is:' in l_search:
                         wl_incrementor.append(float(l_search.split(':')[1]))
 
-            # Step 2: Extract the Wang-Landau weights
-            # Case 2-1: Euilibrated weights
+            # Step 2: Extract the Wang-Landau weights if they are equilibrated
             if 'Weights have equilibrated' in l:
                 self.equil = True
                 # Step 1: search equilibrated weights
@@ -129,10 +128,19 @@ class EXE_LogInfo:
                     self.dt / 1000   # units: ns
 
                 break
+            
+        # some additional information if the weights are eqilibrated
+        if self.equil is True:
+            avg_counts = sum(equil_counts) / len(equil_counts)
+            self.max_Nratio = max(equil_counts) / avg_counts
+            self.min_Nratio = min(equil_counts) / avg_counts
+            self.E_err = np.abs(np.log(equil_counts[0] / equil_counts[-1]))
+
 
         # Case 2-2: Non-equilibrated weights
         if self.fixed is False and self.equil is False:
-            
+            self.N_updated = len(wl_incrementor) - 1  
+            self.N_update = int(np.ceil(np.log(self.cutoff / wl_incrementor[-1]) np.log(self.wl_scale)))  # number of updates required
 
 
         update_time = np.array(update_step) * self.dt / 1000   # units: ns
@@ -154,20 +162,25 @@ class EXE_LogInfo:
             line_n += 1
             if 'MC-lambda information' in l: # should find this line first (lines[line_n - 1])
                 final_found = True
+                if self.fixed is True:
+                    data_line = line_n - 3
+                else:
+                    data_line = line_n - 4
+
                 for i in range(self.N_states):
-                    if lines[line_n - 4 - i].split()[-1] == '<<':
-                        self.final_w.append(float(lines[line_n - 4 - i].split()[-3]))
-                        final_counts[i] = float(lines[line_n - 4 - i].split()[-4])
+                    if lines[data_line - i].split()[-1] == '<<':
+                        self.final_w.append(float(lines[data_line - i].split()[-3]))
+                        final_counts[i] = float(lines[data_line - i].split()[-4])
                     else:
-                        self.final_w.append(float(lines[line_n - 4 - i].split()[-2]))
-                        final_counts[i] = float(lines[line_n - 4 - i].split()[-3])
+                        self.final_w.append(float(lines[data_line - i].split()[-2]))
+                        final_counts[i] = float(lines[data_line - i].split()[-3])
             
             if '  Step  ' in l and final_found is True:  # lines[line_n - 1]
-                final_time = float(lines[line_ne - 2].split()[1]) / 1000  # units: ns
+                self.final_time = float(lines[line_ne - 2].split()[1]) / 1000  # units: ns
                 break
 
-        return final_time, final_counts
-        
+        return final_counts
+
 
 
 
